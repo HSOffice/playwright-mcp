@@ -1,20 +1,19 @@
+using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
-using PlaywrightMcpServer.Browser;
+using ModelContextProtocol.Server;
 
 namespace PlaywrightMcpServer;
 
 internal sealed class ToolRegistry
 {
-    private readonly BrowserManager _browserManager;
-    private readonly CommandLineOptions _options;
     private readonly List<ToolDefinition> _tools = new();
     private readonly Dictionary<string, ToolDefinition> _toolMap = new(StringComparer.Ordinal);
+    private readonly NullabilityInfoContext _nullability = new();
 
-    public ToolRegistry(CommandLineOptions options, BrowserManager browserManager)
+    public ToolRegistry(CommandLineOptions options)
     {
-        _browserManager = browserManager;
-        _options = options;
-        BuildTools();
+        DiscoverTools();
     }
 
     public IReadOnlyList<object> ListTools()
@@ -25,222 +24,300 @@ internal sealed class ToolRegistry
     public async Task<McpResponse> CallToolAsync(string name, JsonElement? arguments)
     {
         if (!_toolMap.TryGetValue(name, out var tool))
-            return ResponseBuilder.Error($"Tool \"{name}\" not found");
-        if (tool.Handler == null)
-            return ResponseBuilder.Error($"Tool \"{name}\" is not implemented in this server.");
+            return McpResponse.Error($"Tool \"{name}\" not found");
+
         try
         {
-            return await tool.Handler(arguments);
+            return await tool.InvokeAsync(arguments, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            return ResponseBuilder.Error(ex.Message);
+            return McpResponse.Error(ex.Message);
         }
     }
 
-    private void BuildTools()
+    private void DiscoverTools()
     {
-        AddTool(CreateNavigateTool());
-        AddTool(CreateNavigateBackTool());
-        AddTool(CreateClickTool());
-
-        AddTool(CreateStubTool("browser_console_messages", "Read console messages", "Inspect console output", ToolType.ReadOnly));
-        AddTool(CreateStubTool("browser_drag", "Drag element", "Drag an element on the page", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_evaluate", "Evaluate script", "Evaluate JavaScript in the page", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_file_upload", "Upload file", "Upload a file to an input", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_fill_form", "Fill form", "Fill a form field", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_handle_dialog", "Handle dialog", "Handle browser dialogs", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_hover", "Hover element", "Hover an element", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_select_option", "Select option", "Select option in a form control", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_type", "Type text", "Type into an element", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_close", "Close tab", "Close the current tab", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_install", "Install browser", "Install additional browser binaries", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_network_requests", "Inspect network", "Inspect network requests", ToolType.ReadOnly));
-        AddTool(CreateStubTool("browser_press_key", "Press key", "Press a key in the page", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_resize", "Resize page", "Resize the page viewport", ToolType.Destructive));
-        AddTool(CreateStubTool("browser_snapshot", "Take snapshot", "Capture a DOM snapshot", ToolType.ReadOnly));
-        AddTool(CreateStubTool("browser_tabs", "List tabs", "List open tabs", ToolType.ReadOnly));
-        AddTool(CreateStubTool("browser_take_screenshot", "Screenshot", "Capture a screenshot", ToolType.ReadOnly));
-        AddTool(CreateStubTool("browser_wait_for", "Wait for", "Wait for a condition", ToolType.Destructive));
-
-        if (_options.IncludeConnectTool)
-            AddTool(CreateStubTool("browser_connect", "Connect to browser", "Connect to an existing browser", ToolType.Destructive));
-
-        if (_options.Capabilities.Contains("pdf"))
-            AddTool(CreateStubTool("browser_pdf_save", "Save PDF", "Save the current page as PDF", ToolType.Destructive, capability: "pdf"));
-
-        if (_options.Capabilities.Contains("vision"))
+        var assembly = Assembly.GetExecutingAssembly();
+        foreach (var type in assembly.GetTypes())
         {
-            AddTool(CreateStubTool("browser_mouse_move_xy", "Move mouse", "Move the mouse using coordinates", ToolType.Destructive, capability: "vision"));
-            AddTool(CreateStubTool("browser_mouse_click_xy", "Click mouse", "Click using page coordinates", ToolType.Destructive, capability: "vision"));
-            AddTool(CreateStubTool("browser_mouse_drag_xy", "Drag mouse", "Drag using page coordinates", ToolType.Destructive, capability: "vision"));
+            if (type.GetCustomAttribute<McpServerToolTypeAttribute>() is null)
+                continue;
+
+            var isStatic = type.IsAbstract && type.IsSealed;
+            var isSealed = type.IsSealed && !type.IsAbstract;
+            if (!isStatic && !isSealed)
+                throw new InvalidOperationException($"Tool type '{type.FullName}' must be a static or sealed class.");
+
+            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                var attribute = method.GetCustomAttribute<McpServerToolAttribute>();
+                if (attribute is null)
+                    continue;
+
+                if (!typeof(Task<string>).IsAssignableFrom(method.ReturnType))
+                    throw new InvalidOperationException($"Tool method '{method.Name}' must return Task<string>.");
+
+                var definition = CreateToolDefinition(type, method, attribute);
+                if (_toolMap.ContainsKey(definition.Name))
+                    throw new InvalidOperationException($"Duplicate tool name '{definition.Name}'.");
+
+                _toolMap[definition.Name] = definition;
+                _tools.Add(definition);
+            }
         }
-
     }
 
-    private void AddTool(ToolDefinition tool)
+    private ToolDefinition CreateToolDefinition(Type type, MethodInfo method, McpServerToolAttribute attribute)
     {
-        if (_toolMap.ContainsKey(tool.Name))
-            return;
-        _toolMap[tool.Name] = tool;
-        _tools.Add(tool);
-    }
-
-    private ToolDefinition CreateNavigateTool()
-    {
-        var inputSchema = new
-        {
-            type = "object",
-            properties = new Dictionary<string, object>
-            {
-                ["url"] = new Dictionary<string, object>
-                {
-                    ["type"] = "string",
-                    ["description"] = "The URL to navigate to"
-                }
-            },
-            required = new[] { "url" }
-        };
-
-        return new ToolDefinition(
-            name: "browser_navigate",
-            title: "Navigate to a URL",
-            description: "Navigate to a URL",
-            type: ToolType.Destructive,
-            capability: "core",
-            inputSchema: inputSchema,
-            handler: async args =>
-            {
-                if (args is not { ValueKind: JsonValueKind.Object } element || !element.TryGetProperty("url", out var urlElement) || urlElement.ValueKind != JsonValueKind.String)
-                    return ResponseBuilder.Error("Missing \"url\" argument.");
-                var url = urlElement.GetString()!;
-                await _browserManager.NavigateAsync(url);
-                var snapshot = await _browserManager.CaptureSnapshotAsync();
-                var code = $"await page.goto('{ResponseBuilder.EscapeJavaScript(url)}');";
-                return ResponseBuilder.Success(code, snapshot);
-            }
-        );
-    }
-
-    private ToolDefinition CreateNavigateBackTool()
-    {
-        return CreateStubTool("browser_navigate_back", "Go back", "Navigate to the previous page", ToolType.Destructive);
-    }
-
-    private ToolDefinition CreateClickTool()
-    {
-        var inputSchema = new
-        {
-            type = "object",
-            properties = new Dictionary<string, object>
-            {
-                ["element"] = new Dictionary<string, object>
-                {
-                    ["type"] = "string",
-                    ["description"] = "The textual description of the element"
-                },
-                ["ref"] = new Dictionary<string, object>
-                {
-                    ["type"] = "string",
-                    ["description"] = "Element reference returned from page snapshot"
-                }
-            },
-            required = new[] { "element", "ref" }
-        };
-
-        return new ToolDefinition(
-            name: "browser_click",
-            title: "Click element",
-            description: "Click an element on the page",
-            type: ToolType.Destructive,
-            capability: "core",
-            inputSchema: inputSchema,
-            handler: async args =>
-            {
-                if (args is not { ValueKind: JsonValueKind.Object } element)
-                    return ResponseBuilder.Error("Invalid arguments for browser_click.");
-                if (!element.TryGetProperty("ref", out var refElement) || refElement.ValueKind != JsonValueKind.String)
-                    return ResponseBuilder.Error("Missing \"ref\" argument.");
-                var refId = refElement.GetString()!;
-                if (!_browserManager.TryGetElement(refId, out var info))
-                    return ResponseBuilder.Error($"Element reference '{refId}' was not found. Use browser_navigate to refresh the page state.");
-
-                await _browserManager.ClickAsync(info);
-                var snapshot = await _browserManager.CaptureSnapshotAsync();
-                var code = _browserManager.BuildClickSnippet(info);
-                return ResponseBuilder.Success(code, snapshot);
-            }
-        );
-    }
-
-    private static ToolDefinition CreateStubTool(string name, string title, string description, ToolType type, string capability = "core")
-    {
-        var inputSchema = new
-        {
-            type = "object",
-            properties = new Dictionary<string, object>(),
-            required = Array.Empty<string>()
-        };
+        var name = attribute.Name ?? BuildDefaultName(method.Name);
+        var description = method.GetCustomAttribute<DescriptionAttribute>()?.Description ?? name;
+        var parameters = method.GetParameters();
+        var parameterInfos = parameters.Select(p => _nullability.Create(p)).ToArray();
+        var inputSchema = BuildInputSchema(parameters, parameterInfos);
+        var title = description;
 
         return new ToolDefinition(
             name,
-            title,
             description,
-            type,
-            capability,
+            title,
+            attribute.Destructive,
             inputSchema,
-            handler: _ => Task.FromResult(ResponseBuilder.Error($"Tool \"{name}\" is not implemented in the C# server."))
-        );
-    }
-}
-
-internal enum ToolType
-{
-    Destructive,
-    ReadOnly
-}
-
-internal sealed class ToolDefinition
-{
-    public ToolDefinition(string name, string title, string description, ToolType type, string capability, object inputSchema, Func<JsonElement?, Task<McpResponse>> handler)
-    {
-        Name = name;
-        Title = title;
-        Description = description;
-        Type = type;
-        Capability = capability;
-        InputSchema = inputSchema;
-        Handler = handler;
+            async (args, cancellationToken) => await InvokeAsync(method, parameters, parameterInfos, args, cancellationToken).ConfigureAwait(false));
     }
 
-    public string Name { get; }
-
-    public string Title { get; }
-
-    public string Description { get; }
-
-    public ToolType Type { get; }
-
-    public string Capability { get; }
-
-    public object InputSchema { get; }
-
-    public Func<JsonElement?, Task<McpResponse>>? Handler { get; }
-
-    public object ToJson()
+    private static string BuildDefaultName(string methodName)
     {
+        if (methodName.EndsWith("Async", StringComparison.Ordinal))
+            methodName = methodName[..^5];
+        if (string.IsNullOrEmpty(methodName))
+            throw new InvalidOperationException("Tool method name cannot be empty.");
+        return char.ToLowerInvariant(methodName[0]) + methodName[1..];
+    }
+
+    private static object BuildInputSchema(ParameterInfo[] parameters, NullabilityInfo[] nullabilities)
+    {
+        var properties = new Dictionary<string, object>();
+        var required = new List<string>();
+        for (var i = 0; i < parameters.Length; i++)
+        {
+            var parameter = parameters[i];
+            if (parameter.ParameterType == typeof(CancellationToken))
+                continue;
+
+            var schema = new Dictionary<string, object>
+            {
+                ["type"] = MapSchemaType(parameter.ParameterType)
+            };
+
+            var description = parameter.GetCustomAttribute<DescriptionAttribute>()?.Description;
+            if (!string.IsNullOrWhiteSpace(description))
+                schema["description"] = description;
+
+            if (parameter.HasDefaultValue && parameter.DefaultValue is not null)
+                schema["default"] = parameter.DefaultValue;
+
+            var propertyName = parameter.Name ?? $"arg{i}";
+            properties[propertyName] = schema;
+
+            if (!IsOptional(parameter, nullabilities[i]))
+                required.Add(propertyName);
+        }
+
         return new
         {
-            name = Name,
-            description = Description,
-            inputSchema = InputSchema,
-            annotations = new
-            {
-                title = Title,
-                readOnlyHint = Type == ToolType.ReadOnly,
-                destructiveHint = Type == ToolType.Destructive,
-                openWorldHint = true
-            }
+            type = "object",
+            properties,
+            required = required.ToArray()
         };
+    }
+
+    private static string MapSchemaType(Type type)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        if (type == typeof(bool))
+            return "boolean";
+        if (type == typeof(int) || type == typeof(long))
+            return "integer";
+        if (type == typeof(float) || type == typeof(double) || type == typeof(decimal))
+            return "number";
+        return "string";
+    }
+
+    private static bool IsOptional(ParameterInfo parameter, NullabilityInfo nullability)
+    {
+        if (parameter.ParameterType == typeof(CancellationToken))
+            return true;
+        if (parameter.HasDefaultValue)
+            return true;
+        if (Nullable.GetUnderlyingType(parameter.ParameterType) is not null)
+            return true;
+        return nullability.WriteState switch
+        {
+            NullabilityState.Nullable => true,
+            NullabilityState.Unknown => false,
+            _ => false
+        };
+    }
+
+    private static async Task<McpResponse> InvokeAsync(MethodInfo method, ParameterInfo[] parameters, NullabilityInfo[] nullabilities, JsonElement? arguments, CancellationToken cancellationToken)
+    {
+        var values = new object?[parameters.Length];
+        var argumentMap = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (arguments is { ValueKind: JsonValueKind.Object } obj)
+        {
+            foreach (var property in obj.EnumerateObject())
+                argumentMap[property.Name] = property.Value;
+        }
+
+        for (var i = 0; i < parameters.Length; i++)
+        {
+            var parameter = parameters[i];
+            if (parameter.ParameterType == typeof(CancellationToken))
+            {
+                values[i] = cancellationToken;
+                continue;
+            }
+
+            var name = parameter.Name ?? $"arg{i}";
+            if (!argumentMap.TryGetValue(name, out var element))
+            {
+                if (parameter.HasDefaultValue)
+                {
+                    values[i] = parameter.DefaultValue;
+                    continue;
+                }
+
+                if (Nullable.GetUnderlyingType(parameter.ParameterType) is not null || nullabilities[i].WriteState == NullabilityState.Nullable)
+                {
+                    values[i] = null;
+                    continue;
+                }
+
+                return McpResponse.Error($"Missing required argument \"{name}\".");
+            }
+
+            values[i] = ConvertArgument(element, parameter.ParameterType, name);
+        }
+
+        if (method.Invoke(null, values) is not Task<string> task)
+            throw new InvalidOperationException($"Tool method '{method.Name}' did not return Task<string>.");
+
+        var resultJson = await task.ConfigureAwait(false);
+        return McpResponse.FromJson(resultJson);
+    }
+
+    private static object? ConvertArgument(JsonElement element, Type targetType, string name)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType);
+        if (underlying != null)
+        {
+            if (element.ValueKind == JsonValueKind.Null)
+                return null;
+            targetType = underlying;
+        }
+
+        if (targetType == typeof(string))
+        {
+            if (element.ValueKind is JsonValueKind.Null)
+                return null;
+            return element.GetString();
+        }
+
+        if (targetType == typeof(int))
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var intValue))
+                return intValue;
+            if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out intValue))
+                return intValue;
+            throw new InvalidOperationException($"Argument \"{name}\" must be an integer.");
+        }
+
+        if (targetType == typeof(long))
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out var longValue))
+                return longValue;
+            if (element.ValueKind == JsonValueKind.String && long.TryParse(element.GetString(), out longValue))
+                return longValue;
+            throw new InvalidOperationException($"Argument \"{name}\" must be an integer.");
+        }
+
+        if (targetType == typeof(double))
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetDouble(out var doubleValue))
+                return doubleValue;
+            if (element.ValueKind == JsonValueKind.String && double.TryParse(element.GetString(), out doubleValue))
+                return doubleValue;
+            throw new InvalidOperationException($"Argument \"{name}\" must be a number.");
+        }
+
+        if (targetType == typeof(float))
+        {
+            if (element.ValueKind == JsonValueKind.Number && element.TryGetDouble(out var doubleValue))
+                return (float)doubleValue;
+            if (element.ValueKind == JsonValueKind.String && float.TryParse(element.GetString(), out var floatValue))
+                return floatValue;
+            throw new InvalidOperationException($"Argument \"{name}\" must be a number.");
+        }
+
+        if (targetType == typeof(bool))
+        {
+            if (element.ValueKind == JsonValueKind.True)
+                return true;
+            if (element.ValueKind == JsonValueKind.False)
+                return false;
+            if (element.ValueKind == JsonValueKind.String && bool.TryParse(element.GetString(), out var boolValue))
+                return boolValue;
+            throw new InvalidOperationException($"Argument \"{name}\" must be a boolean.");
+        }
+
+        if (targetType == typeof(JsonElement))
+            return element;
+
+        throw new InvalidOperationException($"Unsupported argument type '{targetType.FullName}' for \"{name}\".");
+    }
+
+    private sealed class ToolDefinition
+    {
+        private readonly Func<JsonElement?, CancellationToken, Task<McpResponse>> _handler;
+
+        public ToolDefinition(string name, string description, string title, bool destructive, object inputSchema, Func<JsonElement?, CancellationToken, Task<McpResponse>> handler)
+        {
+            Name = name;
+            Description = description;
+            Title = title;
+            Destructive = destructive;
+            InputSchema = inputSchema;
+            _handler = handler;
+        }
+
+        public string Name { get; }
+
+        public string Description { get; }
+
+        public string Title { get; }
+
+        public bool Destructive { get; }
+
+        public object InputSchema { get; }
+
+        public Task<McpResponse> InvokeAsync(JsonElement? arguments, CancellationToken cancellationToken) => _handler(arguments, cancellationToken);
+
+        public object ToJson()
+        {
+            return new
+            {
+                name = Name,
+                description = Description,
+                inputSchema = InputSchema,
+                annotations = new
+                {
+                    title = Title,
+                    readOnlyHint = !Destructive,
+                    destructiveHint = Destructive,
+                    openWorldHint = true
+                }
+            };
+        }
     }
 }
