@@ -7,16 +7,12 @@ internal sealed class McpServer : IAsyncDisposable
 {
     private static readonly JsonElement EmptyId = JsonDocument.Parse("0").RootElement;
 
-    private readonly CommandLineOptions _options;
-    private readonly BrowserManager _browserManager;
     private readonly ToolRegistry _toolRegistry;
     private readonly JsonSerializerOptions _serializerOptions;
 
     public McpServer(CommandLineOptions options)
     {
-        _options = options;
-        _browserManager = new BrowserManager(options);
-        _toolRegistry = new ToolRegistry(options, _browserManager);
+        _toolRegistry = new ToolRegistry(options);
         _serializerOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -89,12 +85,12 @@ internal sealed class McpServer : IAsyncDisposable
             case "tools/call":
                 if (parameters is not { ValueKind: JsonValueKind.Object } callParams)
                 {
-                    await WriteResultAsync(id, ResponseBuilder.Error("Invalid parameters for tools/call.").ToResult());
+                    await WriteResultAsync(id, McpResponse.Error("Invalid parameters for tools/call.").ToResult());
                     break;
                 }
                 if (!callParams.TryGetProperty("name", out var nameElement) || nameElement.ValueKind != JsonValueKind.String)
                 {
-                    await WriteResultAsync(id, ResponseBuilder.Error("Tool name is required.").ToResult());
+                    await WriteResultAsync(id, McpResponse.Error("Tool name is required.").ToResult());
                     break;
                 }
                 var toolName = nameElement.GetString() ?? string.Empty;
@@ -156,6 +152,6 @@ internal sealed class McpServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _browserManager.DisposeAsync();
+        _ = await PlaywrightTools.CloseAsync();
     }
 }
