@@ -8,6 +8,7 @@ using ModelContextProtocol.Server;
 
 namespace PlaywrightMcpServer;
 
+[McpServerToolType]
 public sealed class PlaywrightTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
