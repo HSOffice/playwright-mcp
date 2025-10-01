@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ChatUiTest.MCP.Playwright;
 using Microsoft.Playwright;
 using ModelContextProtocol.Server;
 
@@ -80,10 +81,7 @@ public sealed class PlaywrightTools
             Geolocation = new Geolocation { Latitude = 0, Longitude = 0 }
         }).ConfigureAwait(false);
 
-        await _context.GrantPermissionsAsync(new[]
-        {
-            "geolocation", "notifications", "camera", "microphone", "clipboard-read", "clipboard-write"
-        }).ConfigureAwait(false);
+        await _context.GrantAllPermissionsAsync().ConfigureAwait(false);
 
         _page = await _context.NewPageAsync().ConfigureAwait(false);
     }
