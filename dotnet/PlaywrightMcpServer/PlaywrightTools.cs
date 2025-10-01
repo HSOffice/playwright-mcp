@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ChatUiTest.MCP.Playwright;
 using Microsoft.Playwright;
+using ModelContextProtocol.Server;
 
 namespace PlaywrightMcpServer;
 
@@ -223,6 +224,7 @@ public sealed class PlaywrightTools
         }
     }
 
+    [McpServerTool]
     [Description("Close and dispose Playwright browser resources.")]
     public static async Task<string> CloseAsync(CancellationToken cancellationToken = default)
     {
@@ -259,6 +261,7 @@ public sealed class PlaywrightTools
         return Serialize(new { closed = true });
     }
 
+    [McpServerTool]
     [Description("(Re)launch browser and open a fresh page.")]
     public static async Task<string> RelaunchAsync(CancellationToken cancellationToken = default)
     {
@@ -267,6 +270,7 @@ public sealed class PlaywrightTools
         return Serialize(new { relaunched = true, headless = Headless, engine = _isChromium ? "chromium" : "unknown" });
     }
 
+    [McpServerTool]
     [Description("Navigate to a URL and wait for 'load' state.")]
     public static async Task<string> GotoAsync(
         [Description("URL to navigate to")] string url,
@@ -289,6 +293,7 @@ public sealed class PlaywrightTools
         });
     }
 
+    [McpServerTool]
     [Description("Go back in browser history if possible.")]
     public static async Task<string> GoBackAsync(
         [Description("Timeout ms (default 15000)")] int? timeoutMs = 15000,
@@ -309,6 +314,7 @@ public sealed class PlaywrightTools
         });
     }
 
+    [McpServerTool]
     [Description("Click an element by CSS/XPath/text selector.")]
     public static async Task<string> ClickAsync(
         [Description("Selector (CSS default; prefix with xpath= for XPath, text= for text)")] string selector,
@@ -323,6 +329,7 @@ public sealed class PlaywrightTools
         return Serialize(new { clicked = selector });
     }
 
+    [McpServerTool]
     [Description("Hover over an element by selector.")]
     public static async Task<string> HoverAsync(
         [Description("Selector")] string selector,
@@ -337,6 +344,7 @@ public sealed class PlaywrightTools
         return Serialize(new { hovered = selector });
     }
 
+    [McpServerTool]
     [Description("Drag an element onto another selector.")]
     public static async Task<string> DragAndDropAsync(
         [Description("Source selector")] string sourceSelector,
@@ -352,6 +360,7 @@ public sealed class PlaywrightTools
         return Serialize(new { dragged = sourceSelector, droppedOn = targetSelector });
     }
 
+    [McpServerTool]
     [Description("Fill input/textarea by selector with given text.")]
     public static async Task<string> FillAsync(
         [Description("Selector")] string selector,
@@ -367,6 +376,7 @@ public sealed class PlaywrightTools
         return Serialize(new { filled = selector, length = text?.Length ?? 0 });
     }
 
+    [McpServerTool]
     [Description("Type text into an element, optionally pressing Enter.")]
     public static async Task<string> TypeAsync(
         [Description("Selector")] string selector,
@@ -391,6 +401,7 @@ public sealed class PlaywrightTools
         return Serialize(new { typed = selector, length = text?.Length ?? 0, submit });
     }
 
+    [McpServerTool]
     [Description("Get innerText from the first matched element.")]
     public static async Task<string> InnerTextAsync(
         [Description("Selector")] string selector,
@@ -407,6 +418,7 @@ public sealed class PlaywrightTools
         return Serialize(new { selector, text });
     }
 
+    [McpServerTool]
     [Description("Press a single keyboard key on the active page.")]
     public static async Task<string> PressKeyAsync(
         [Description("Key, e.g. Enter or Control+S")] string key,
@@ -422,6 +434,7 @@ public sealed class PlaywrightTools
         return Serialize(new { pressed = key, delayMs });
     }
 
+    [McpServerTool]
     [Description("Take a screenshot of the page or a selector.")]
     public static async Task<string> ScreenshotAsync(
         [Description("Output path (PNG/JPEG). If relative, saved under ./shots")] string outputPath,
@@ -467,6 +480,7 @@ public sealed class PlaywrightTools
         });
     }
 
+    [McpServerTool]
     [Description("Select one or more option values in a select element.")]
     public static async Task<string> SelectOptionAsync(
         [Description("Selector for the <select> element")] string selector,
@@ -488,6 +502,7 @@ public sealed class PlaywrightTools
         return Serialize(new { selector, selected });
     }
 
+    [McpServerTool]
     [Description("Upload local files to an <input type=\"file\"> element.")]
     public static async Task<string> UploadFilesAsync(
         [Description("Selector for file input")] string selector,
@@ -513,6 +528,7 @@ public sealed class PlaywrightTools
         return Serialize(new { selector, count = absolutePaths.Length });
     }
 
+    [McpServerTool]
     [Description("Fill multiple form fields by selector.")]
     public static async Task<string> FillFormAsync(
         [Description("Fields to fill")] FormField[] fields,
@@ -546,6 +562,7 @@ public sealed class PlaywrightTools
         return Serialize(new { count = results.Count, results });
     }
 
+    [McpServerTool]
     [Description("Export current page as PDF (Chromium only).")]
     public static async Task<string> PdfAsync(
         [Description("Output path (*.pdf). If relative, saved under ./shots")] string outputPath,
@@ -580,6 +597,7 @@ public sealed class PlaywrightTools
         });
     }
 
+    [McpServerTool]
     [Description("Handle the next dialog by accepting or dismissing it.")]
     public static async Task<string> HandleDialogAsync(
         [Description("Accept dialog (true) or dismiss (false)")] bool accept = true,
@@ -642,6 +660,7 @@ public sealed class PlaywrightTools
         }
     }
 
+    [McpServerTool]
     [Description("Wait for selector to be attached/visible/hidden/detached.")]
     public static async Task<string> WaitForSelectorAsync(
         [Description("Selector")] string selector,
@@ -668,6 +687,7 @@ public sealed class PlaywrightTools
         return Serialize(new { waited = selector, state = targetState.ToString() });
     }
 
+    [McpServerTool]
     [Description("Wait for text to appear/disappear or for a specific time.")]
     public static async Task<string> WaitForAsync(
         [Description("Text to appear")] string? text = null,
@@ -713,6 +733,7 @@ public sealed class PlaywrightTools
         });
     }
 
+    [McpServerTool]
     [Description("Evaluate JavaScript in page and return JSON-serializable result.")]
     public static async Task<string> EvalAsync(
         [Description("JS expression: must return JSON-serializable value")] string jsExpression,
@@ -723,6 +744,7 @@ public sealed class PlaywrightTools
         return Serialize(new { result });
     }
 
+    [McpServerTool]
     [Description("Get current page URL.")]
     public static async Task<string> GetUrlAsync(CancellationToken cancellationToken = default)
     {
@@ -730,6 +752,7 @@ public sealed class PlaywrightTools
         return Serialize(new { url = _page!.Url });
     }
 
+    [McpServerTool]
     [Description("Get captured console messages since the current page was opened/switch.")]
     public static async Task<string> ConsoleMessagesAsync(CancellationToken cancellationToken = default)
     {
@@ -738,6 +761,7 @@ public sealed class PlaywrightTools
         return Serialize(new { messages });
     }
 
+    [McpServerTool]
     [Description("List captured network requests since the current page was opened/switch.")]
     public static async Task<string> NetworkRequestsAsync(CancellationToken cancellationToken = default)
     {
@@ -746,6 +770,7 @@ public sealed class PlaywrightTools
         return Serialize(new { requests });
     }
 
+    [McpServerTool]
     [Description("Resize browser viewport.")]
     public static async Task<string> ResizeAsync(
         [Description("Viewport width")] int width,
@@ -757,6 +782,7 @@ public sealed class PlaywrightTools
         return Serialize(new { width, height });
     }
 
+    [McpServerTool]
     [Description("Capture an accessibility snapshot of the page.")]
     public static async Task<string> SnapshotAsync(CancellationToken cancellationToken = default)
     {
@@ -765,6 +791,7 @@ public sealed class PlaywrightTools
         return Serialize(new { snapshot });
     }
 
+    [McpServerTool]
     [Description("Manage tabs: list, create, close or switch.")]
     public static async Task<string> TabsAsync(
         [Description("Action: list|new|close|switch")] string action,
@@ -831,6 +858,7 @@ public sealed class PlaywrightTools
         }
     }
 
+    [McpServerTool]
     [Description("Install Playwright browsers using bundled CLI.")]
     public static async Task<string> InstallAsync(
         [Description("Optional browser name, e.g. chromium")] string? browser = null,
@@ -844,6 +872,7 @@ public sealed class PlaywrightTools
         return Serialize(new { success = exitCode == 0, exitCode, browser });
     }
 
+    [McpServerTool]
     [Description("Move mouse to coordinates relative to page viewport.")]
     public static async Task<string> MouseMoveAsync(
         [Description("X coordinate")] double x,
@@ -856,6 +885,7 @@ public sealed class PlaywrightTools
         return Serialize(new { x, y, steps });
     }
 
+    [McpServerTool]
     [Description("Click mouse at coordinates relative to page viewport.")]
     public static async Task<string> MouseClickAsync(
         [Description("X coordinate")] double x,
@@ -878,6 +908,7 @@ public sealed class PlaywrightTools
         return Serialize(new { x, y, button, clickCount });
     }
 
+    [McpServerTool]
     [Description("Drag mouse between coordinates relative to viewport.")]
     public static async Task<string> MouseDragAsync(
         [Description("Start X")] double startX,
@@ -895,6 +926,7 @@ public sealed class PlaywrightTools
         return Serialize(new { startX, startY, endX, endY, steps });
     }
 
+    [McpServerTool]
     [Description("Start Playwright tracing (snapshots, screenshots, sources).")]
     public static async Task<string> StartTracingAsync(CancellationToken cancellationToken = default)
     {
@@ -916,6 +948,7 @@ public sealed class PlaywrightTools
         return Serialize(new { tracing = true });
     }
 
+    [McpServerTool]
     [Description("Stop tracing and save to a .zip file.")]
     public static async Task<string> StopTracingAsync(
         [Description("Output path for trace .zip (default ./traces/trace-<timestamp>.zip")] string? outputPath = null,
