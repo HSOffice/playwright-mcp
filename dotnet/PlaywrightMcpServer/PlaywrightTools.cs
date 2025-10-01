@@ -25,7 +25,7 @@ public sealed class PlaywrightTools
 
     private static readonly List<ConsoleMessageEntry> ConsoleMessages = new();
     private static readonly List<NetworkRequestEntry> NetworkRequests = new();
-    private static readonly Dictionary<string, NetworkRequestEntry> NetworkRequestMap = new();
+    private static readonly Dictionary<IRequest, NetworkRequestEntry> NetworkRequestMap = new();
 
     private static bool Headless =>
         (Environment.GetEnvironmentVariable("MCP_PLAYWRIGHT_HEADLESS") ?? "false")
@@ -162,7 +162,7 @@ public sealed class PlaywrightTools
         lock (NetworkRequests)
         {
             NetworkRequests.Add(entry);
-            NetworkRequestMap[request.Guid] = entry;
+            NetworkRequestMap[request] = entry;
             if (NetworkRequests.Count > 500)
             {
                 var first = NetworkRequests.First();
@@ -178,7 +178,7 @@ public sealed class PlaywrightTools
     {
         lock (NetworkRequests)
         {
-            if (NetworkRequestMap.TryGetValue(response.Request.Guid, out var entry))
+            if (NetworkRequestMap.TryGetValue(response.Request, out var entry))
             {
                 entry.Status = response.Status;
             }
@@ -189,7 +189,7 @@ public sealed class PlaywrightTools
     {
         lock (NetworkRequests)
         {
-            if (NetworkRequestMap.TryGetValue(request.Guid, out var entry))
+            if (NetworkRequestMap.TryGetValue(request, out var entry))
             {
                 entry.Failure = request.Failure;
             }
@@ -753,7 +753,7 @@ public sealed class PlaywrightTools
         CancellationToken cancellationToken = default)
     {
         await EnsureLaunchedAsync(cancellationToken).ConfigureAwait(false);
-        await _page!.SetViewportSizeAsync(new ViewportSize { Width = width, Height = height }).ConfigureAwait(false);
+        await _page!.SetViewportSizeAsync(width, height).ConfigureAwait(false);
         return Serialize(new { width, height });
     }
 
@@ -840,7 +840,7 @@ public sealed class PlaywrightTools
         if (!string.IsNullOrWhiteSpace(browser))
             args.Add(browser);
 
-        var exitCode = await Microsoft.Playwright.Program.Main(args.ToArray()).ConfigureAwait(false);
+        var exitCode = Microsoft.Playwright.Program.Main(args.ToArray());
         return Serialize(new { success = exitCode == 0, exitCode, browser });
     }
 
