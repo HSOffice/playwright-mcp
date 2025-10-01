@@ -884,7 +884,7 @@ public sealed class PlaywrightTools
         CancellationToken cancellationToken = default)
     {
         await EnsureLaunchedAsync(cancellationToken).ConfigureAwait(false);
-        await _page!.Mouse.MoveAsync(x, y, new MouseMoveOptions { Steps = steps }).ConfigureAwait(false);
+        await _page!.Mouse.MoveAsync((float)x, (float)y, new MouseMoveOptions { Steps = steps }).ConfigureAwait(false);
         return Serialize(new { x, y, steps });
     }
 
@@ -898,7 +898,7 @@ public sealed class PlaywrightTools
         CancellationToken cancellationToken = default)
     {
         await EnsureLaunchedAsync(cancellationToken).ConfigureAwait(false);
-        await _page!.Mouse.ClickAsync(x, y, new MouseClickOptions
+        await _page!.Mouse.ClickAsync((float)x, (float)y, new MouseClickOptions
         {
             Button = button switch
             {
@@ -922,9 +922,9 @@ public sealed class PlaywrightTools
         CancellationToken cancellationToken = default)
     {
         await EnsureLaunchedAsync(cancellationToken).ConfigureAwait(false);
-        await _page!.Mouse.MoveAsync(startX, startY).ConfigureAwait(false);
+        await _page!.Mouse.MoveAsync((float)startX, (float)startY).ConfigureAwait(false);
         await _page.Mouse.DownAsync().ConfigureAwait(false);
-        await _page.Mouse.MoveAsync(endX, endY, new MouseMoveOptions { Steps = steps }).ConfigureAwait(false);
+        await _page.Mouse.MoveAsync((float)endX, (float)endY, new MouseMoveOptions { Steps = steps }).ConfigureAwait(false);
         await _page.Mouse.UpAsync().ConfigureAwait(false);
         return Serialize(new { startX, startY, endX, endY, steps });
     }
